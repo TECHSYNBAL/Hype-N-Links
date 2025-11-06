@@ -17,7 +17,8 @@ app.add_middleware(
 
 # Ollama API URL - defaults to localhost, can be overridden with env var
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama2")
+# Using tinyllama as default - smaller model that works on Railway free tier
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "tinyllama")
 
 
 class ChatRequest(BaseModel):

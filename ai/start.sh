@@ -24,7 +24,8 @@ if [ "$OLLAMA_READY" = false ]; then
 fi
 
 # Check if model exists, if not pull it in background (don't block startup)
-MODEL=${OLLAMA_MODEL:-llama2}
+# Using tinyllama as default - much smaller and works on Railway free tier
+MODEL=${OLLAMA_MODEL:-tinyllama}
 echo "Checking for model: $MODEL"
 if command -v ollama > /dev/null 2>&1; then
     if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
