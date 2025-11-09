@@ -162,7 +162,7 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: Colors.black,
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
+          constraints: const BoxConstraints(maxWidth: 750),
           child: SizedBox(
             width: double.infinity,
             height: double.infinity,
@@ -388,6 +388,9 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
   // Scroll controller for auto-scrolling to new responses
   final ScrollController _scrollController = ScrollController();
 
+  // Track if auto-scrolling is enabled (disabled when user manually scrolls)
+  bool _autoScrollEnabled = true;
+
   @override
   void initState() {
     super.initState();
@@ -399,6 +402,52 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
       setState(() {
         _isInputFocused = _inputFocusNode.hasFocus;
       });
+    });
+
+    // Listen to scroll changes to detect manual scrolling
+    _scrollController.addListener(() {
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+        // If user is near the bottom (within 50px), re-enable auto-scroll
+        // Otherwise, disable auto-scroll if user scrolled up
+        if (maxScroll > 0) {
+          final distanceFromBottom = maxScroll - currentScroll;
+          if (distanceFromBottom < 50) {
+            // User is near bottom, enable auto-scroll
+            // Also check if any response is still loading/streaming
+            final hasLoadingContent = _qaPairs.any((pair) => pair.isLoading);
+            if (!_autoScrollEnabled || hasLoadingContent) {
+              setState(() {
+                _autoScrollEnabled = true;
+              });
+              // If content is still streaming and user is at bottom, scroll immediately
+              if (hasLoadingContent) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_scrollController.hasClients) {
+                    final currentMaxScroll =
+                        _scrollController.position.maxScrollExtent;
+                    if (currentMaxScroll > 0) {
+                      _scrollController.animateTo(
+                        currentMaxScroll,
+                        duration: const Duration(milliseconds: 100),
+                        curve: Curves.easeOut,
+                      );
+                    }
+                  }
+                });
+              }
+            }
+          } else if (distanceFromBottom > 100) {
+            // User scrolled up significantly, disable auto-scroll
+            if (_autoScrollEnabled) {
+              setState(() {
+                _autoScrollEnabled = false;
+              });
+            }
+          }
+        }
+      }
     });
 
     _inputController.addListener(() {
@@ -462,19 +511,21 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
       // Fetch AI response for the new question
       _fetchAIResponse(newPair);
 
-      // Scroll to bottom after a short delay, only if content exceeds viewport
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          final maxScroll = _scrollController.position.maxScrollExtent;
-          if (maxScroll > 0) {
-            _scrollController.animateTo(
-              maxScroll,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
+      // Scroll to bottom after a short delay, only if auto-scroll is enabled
+      if (_autoScrollEnabled) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            final maxScroll = _scrollController.position.maxScrollExtent;
+            if (maxScroll > 0) {
+              _scrollController.animateTo(
+                maxScroll,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
           }
-        }
-      });
+        });
+      }
     }
   }
 
@@ -535,20 +586,22 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
                     pair.isLoading = false;
                     pair.dotsController?.stop();
                   });
-                  // Auto-scroll to bottom as response streams in, only if content exceeds viewport
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (_scrollController.hasClients) {
-                      final maxScroll =
-                          _scrollController.position.maxScrollExtent;
-                      if (maxScroll > 0) {
-                        _scrollController.animateTo(
-                          maxScroll,
-                          duration: const Duration(milliseconds: 100),
-                          curve: Curves.easeOut,
-                        );
+                  // Auto-scroll to bottom as response streams in, only if auto-scroll is enabled
+                  if (_autoScrollEnabled) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (_scrollController.hasClients) {
+                        final maxScroll =
+                            _scrollController.position.maxScrollExtent;
+                        if (maxScroll > 0) {
+                          _scrollController.animateTo(
+                            maxScroll,
+                            duration: const Duration(milliseconds: 100),
+                            curve: Curves.easeOut,
+                          );
+                        }
                       }
-                    }
-                  });
+                    });
+                  }
                 }
               }
               // Check for errors
@@ -591,19 +644,21 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
             pair.isLoading = false;
             pair.dotsController?.stop();
           });
-          // Scroll to bottom when response is complete, only if content exceeds viewport
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients) {
-              final maxScroll = _scrollController.position.maxScrollExtent;
-              if (maxScroll > 0) {
-                _scrollController.animateTo(
-                  maxScroll,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
+          // Scroll to bottom when response is complete, only if auto-scroll is enabled
+          if (_autoScrollEnabled) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollController.hasClients) {
+                final maxScroll = _scrollController.position.maxScrollExtent;
+                if (maxScroll > 0) {
+                  _scrollController.animateTo(
+                    maxScroll,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
               }
-            }
-          });
+            });
+          }
         } else if (mounted &&
             accumulatedResponse.isNotEmpty &&
             pair.response == null) {
@@ -612,19 +667,21 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
             pair.isLoading = false;
             pair.dotsController?.stop();
           });
-          // Scroll to bottom when response is complete, only if content exceeds viewport
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollController.hasClients) {
-              final maxScroll = _scrollController.position.maxScrollExtent;
-              if (maxScroll > 0) {
-                _scrollController.animateTo(
-                  maxScroll,
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeOut,
-                );
+          // Scroll to bottom when response is complete, only if auto-scroll is enabled
+          if (_autoScrollEnabled) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollController.hasClients) {
+                final maxScroll = _scrollController.position.maxScrollExtent;
+                if (maxScroll > 0) {
+                  _scrollController.animateTo(
+                    maxScroll,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
               }
-            }
-          });
+            });
+          }
         }
 
         client.close();
@@ -666,7 +723,7 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
         backgroundColor: Colors.black,
         body: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: const BoxConstraints(maxWidth: 750),
             child: SizedBox(
               width: double.infinity,
               height: double.infinity,
@@ -688,104 +745,108 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
                     ),
                   ),
                   Expanded(
-                    child: Scrollbar(
-                      controller: _scrollController,
-                      thumbVisibility: true,
-                      thickness: 1.0,
-                      radius: const Radius.circular(0),
-                      child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 15.0, right: 15.0),
+                      child: Scrollbar(
                         controller: _scrollController,
-                        reverse: false,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        child: Padding(
-                          padding: const EdgeInsets.only(right: 5.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.start,
-                            children: _qaPairs.asMap().entries.map((entry) {
-                              final index = entry.key;
-                              final pair = entry.value;
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // Question
-                                  Text(
-                                    pair.question,
-                                    style: const TextStyle(
-                                      fontFamily: 'Aeroport',
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                    ),
-                                    textAlign: TextAlign.left,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  // Response (loading, error, or content)
-                                  if (pair.isLoading &&
-                                      pair.dotsController != null)
-                                    AnimatedBuilder(
-                                      animation: pair.dotsController!,
-                                      builder: (context, child) {
-                                        final progress =
-                                            pair.dotsController!.value;
-                                        int dotCount = 1;
-                                        if (progress < 0.33) {
-                                          dotCount = 1;
-                                        } else if (progress < 0.66) {
-                                          dotCount = 2;
-                                        } else {
-                                          dotCount = 3;
-                                        }
-                                        return Text(
-                                          '·' * dotCount,
-                                          style: const TextStyle(
-                                            fontFamily: 'Aeroport',
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w500,
-                                            color: Colors.white,
-                                          ),
-                                          textAlign: TextAlign.left,
-                                        );
-                                      },
-                                    )
-                                  else if (pair.error != null)
+                        thumbVisibility: true,
+                        thickness: 1.0,
+                        radius: const Radius.circular(0),
+                        child: SingleChildScrollView(
+                          controller: _scrollController,
+                          reverse: false,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: Padding(
+                            padding:
+                                const EdgeInsets.only(left: 15.0, right: 15.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: _qaPairs.asMap().entries.map((entry) {
+                                final index = entry.key;
+                                final pair = entry.value;
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Question
                                     Text(
-                                      pair.error!,
+                                      pair.question,
                                       style: const TextStyle(
                                         fontFamily: 'Aeroport',
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.red,
-                                      ),
-                                      textAlign: TextAlign.left,
-                                    )
-                                  else if (pair.response != null)
-                                    Text(
-                                      pair.response!,
-                                      style: const TextStyle(
-                                        fontFamily: 'Aeroport',
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w500,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w700,
                                         color: Colors.white,
                                       ),
                                       textAlign: TextAlign.left,
-                                    )
-                                  else
-                                    const Text(
-                                      'No response received',
-                                      style: TextStyle(
-                                        fontFamily: 'Aeroport',
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.white,
-                                      ),
                                     ),
-                                  // Add spacing between Q&A pairs (except for the last one in reversed list)
-                                  if (index < _qaPairs.length - 1)
-                                    const SizedBox(height: 32),
-                                ],
-                              );
-                            }).toList(),
+                                    const SizedBox(height: 16),
+                                    // Response (loading, error, or content)
+                                    if (pair.isLoading &&
+                                        pair.dotsController != null)
+                                      AnimatedBuilder(
+                                        animation: pair.dotsController!,
+                                        builder: (context, child) {
+                                          final progress =
+                                              pair.dotsController!.value;
+                                          int dotCount = 1;
+                                          if (progress < 0.33) {
+                                            dotCount = 1;
+                                          } else if (progress < 0.66) {
+                                            dotCount = 2;
+                                          } else {
+                                            dotCount = 3;
+                                          }
+                                          return Text(
+                                            '·' * dotCount,
+                                            style: const TextStyle(
+                                              fontFamily: 'Aeroport',
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w500,
+                                              color: Colors.white,
+                                            ),
+                                            textAlign: TextAlign.left,
+                                          );
+                                        },
+                                      )
+                                    else if (pair.error != null)
+                                      Text(
+                                        pair.error!,
+                                        style: const TextStyle(
+                                          fontFamily: 'Aeroport',
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.red,
+                                        ),
+                                        textAlign: TextAlign.left,
+                                      )
+                                    else if (pair.response != null)
+                                      Text(
+                                        pair.response!,
+                                        style: const TextStyle(
+                                          fontFamily: 'Aeroport',
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white,
+                                        ),
+                                        textAlign: TextAlign.left,
+                                      )
+                                    else
+                                      const Text(
+                                        'No response received',
+                                        style: TextStyle(
+                                          fontFamily: 'Aeroport',
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    // Add spacing between Q&A pairs (except for the last one in reversed list)
+                                    if (index < _qaPairs.length - 1)
+                                      const SizedBox(height: 32),
+                                  ],
+                                );
+                              }).toList(),
+                            ),
                           ),
                         ),
                       ),
