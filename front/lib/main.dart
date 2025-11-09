@@ -122,6 +122,7 @@ class _HomePageState extends State<HomePage> {
     _controller.addListener(() {
       // Check if text contains newline (Enter was pressed)
       if (_controller.text.contains('\n')) {
+        print('Newline detected in text field'); // Debug
         // Remove the newline
         final textWithoutNewline = _controller.text.replaceAll('\n', '');
         _controller.value = TextEditingValue(
@@ -146,13 +147,20 @@ class _HomePageState extends State<HomePage> {
 
   void _navigateToNewPage() {
     final text = _controller.text.trim();
+    print('_navigateToNewPage called with text: "$text"'); // Debug
     if (text.isNotEmpty) {
+      print('Navigating to NewPage with title: "$text"'); // Debug
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => NewPage(title: text),
         ),
-      );
+      ).then((_) {
+        // Clear the text field after navigation
+        _controller.clear();
+      });
+    } else {
+      print('Text is empty, not navigating'); // Debug
     }
   }
 
@@ -186,7 +194,7 @@ class _HomePageState extends State<HomePage> {
                 // Add your second child here
                 if (!_isFocused)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 15.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -296,7 +304,7 @@ class _HomePageState extends State<HomePage> {
                   ),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(15),
+                  padding: const EdgeInsets.all(20),
                   decoration: const BoxDecoration(
                     color: Colors.black,
                   ),
@@ -313,6 +321,8 @@ class _HomePageState extends State<HomePage> {
                                     key: _textFieldKey,
                                     controller: _controller,
                                     focusNode: _focusNode,
+                                    enabled: true,
+                                    readOnly: false,
                                     cursorColor: Colors.white,
                                     cursorHeight: 15,
                                     maxLines: 11,
@@ -325,7 +335,13 @@ class _HomePageState extends State<HomePage> {
                                         height: 2.0,
                                         color: Colors.white),
                                     onSubmitted: (value) {
+                                      print(
+                                          'TextField onSubmitted called with: "$value"'); // Debug
                                       _navigateToNewPage();
+                                    },
+                                    onChanged: (value) {
+                                      print(
+                                          'TextField onChanged called with: "$value"'); // Debug
                                     },
                                     decoration: InputDecoration(
                                       hintText: (_isFocused ||
@@ -358,6 +374,8 @@ class _HomePageState extends State<HomePage> {
                                     key: _textFieldKey,
                                     controller: _controller,
                                     focusNode: _focusNode,
+                                    enabled: true,
+                                    readOnly: false,
                                     cursorColor: Colors.white,
                                     cursorHeight: 15,
                                     maxLines: 11,
@@ -373,7 +391,13 @@ class _HomePageState extends State<HomePage> {
                                         height: 2,
                                         color: Colors.white),
                                     onSubmitted: (value) {
+                                      print(
+                                          'TextField onSubmitted called with: "$value"'); // Debug
                                       _navigateToNewPage();
+                                    },
+                                    onChanged: (value) {
+                                      print(
+                                          'TextField onChanged called with: "$value"'); // Debug
                                     },
                                     decoration: InputDecoration(
                                       hintText: (_isFocused ||
@@ -404,6 +428,7 @@ class _HomePageState extends State<HomePage> {
                       const SizedBox(width: 5),
                       GestureDetector(
                         onTap: () {
+                          print('Apply button tapped'); // Debug
                           _navigateToNewPage();
                         },
                         child: SvgPicture.asset(
@@ -467,6 +492,10 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
   // Track if auto-scrolling is enabled (disabled when user manually scrolls)
   bool _autoScrollEnabled = true;
 
+  // Scroll progress for custom scrollbar
+  double _scrollProgress = 0.0;
+  double _scrollIndicatorHeight = 1.0;
+
   @override
   void initState() {
     super.initState();
@@ -480,11 +509,31 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
       });
     });
 
-    // Listen to scroll changes to detect manual scrolling
+    // Listen to scroll changes to detect manual scrolling and update scrollbar
     _scrollController.addListener(() {
       if (_scrollController.hasClients) {
-        final maxScroll = _scrollController.position.maxScrollExtent;
-        final currentScroll = _scrollController.position.pixels;
+        final position = _scrollController.position;
+        final maxScroll = position.maxScrollExtent;
+        final currentScroll = position.pixels;
+        final viewportHeight = position.viewportDimension;
+        final totalHeight = viewportHeight + maxScroll;
+
+        // Update scrollbar
+        if (maxScroll > 0 && totalHeight > 0) {
+          final indicatorHeight =
+              (viewportHeight / totalHeight).clamp(0.0, 1.0);
+          final scrollPosition = (currentScroll / maxScroll).clamp(0.0, 1.0);
+          setState(() {
+            _scrollIndicatorHeight = indicatorHeight;
+            _scrollProgress = scrollPosition;
+          });
+        } else {
+          setState(() {
+            _scrollProgress = 0.0;
+            _scrollIndicatorHeight = 1.0;
+          });
+        }
+
         // If user is near the bottom (within 50px), re-enable auto-scroll
         // Otherwise, disable auto-scroll if user scrolled up
         if (maxScroll > 0) {
@@ -541,12 +590,19 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
       setState(() {});
     });
     // Add initial Q&A pair with the title
-    _qaPairs.add(QAPair(
-      question: widget.title,
-      isLoading: true,
-      dotsController: _dotsController,
-    ));
-    _fetchAIResponse(_qaPairs.last);
+    setState(() {
+      _qaPairs.add(QAPair(
+        question: widget.title,
+        isLoading: true,
+        dotsController: _dotsController,
+      ));
+    });
+    // Fetch response after the first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _qaPairs.isNotEmpty) {
+        _fetchAIResponse(_qaPairs.last);
+      }
+    });
   }
 
   @override
@@ -787,12 +843,8 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
     return Theme(
       data: Theme.of(context).copyWith(
         scrollbarTheme: ScrollbarThemeData(
-          thickness: WidgetStateProperty.all(1.0),
-          radius: const Radius.circular(0),
-          thumbVisibility: WidgetStateProperty.all(true),
-          thumbColor: WidgetStateProperty.all(Colors.white),
-          trackColor: WidgetStateProperty.all(Colors.white.withOpacity(0.2)),
-          minThumbLength: 20.0,
+          thickness: WidgetStateProperty.all(0.0),
+          thumbVisibility: WidgetStateProperty.all(false),
         ),
       ),
       child: Scaffold(
@@ -814,7 +866,7 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
                     },
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.all(15),
+                      padding: const EdgeInsets.all(30),
                       decoration: const BoxDecoration(
                         color: Colors.black,
                       ),
@@ -826,116 +878,166 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
                     ),
                   ),
                   Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 15.0, right: 15.0),
-                      child: Scrollbar(
-                        controller: _scrollController,
-                        thumbVisibility: true,
-                        thickness: 1.0,
-                        radius: const Radius.circular(0),
-                        child: SingleChildScrollView(
-                          controller: _scrollController,
-                          reverse: false,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.only(left: 15.0, right: 15.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.start,
-                              children: _qaPairs.asMap().entries.map((entry) {
-                                final index = entry.key;
-                                final pair = entry.value;
-                                return Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // Question
-                                    Text(
-                                      pair.question,
-                                      style: const TextStyle(
-                                        fontFamily: 'Aeroport',
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.w400,
-                                        color: Colors.white,
-                                      ),
-                                      textAlign: TextAlign.left,
-                                    ),
-                                    const SizedBox(height: 16),
-                                    // Response (loading, error, or content)
-                                    if (pair.isLoading &&
-                                        pair.dotsController != null)
-                                      AnimatedBuilder(
-                                        animation: pair.dotsController!,
-                                        builder: (context, child) {
-                                          final progress =
-                                              pair.dotsController!.value;
-                                          int dotCount = 1;
-                                          if (progress < 0.33) {
-                                            dotCount = 1;
-                                          } else if (progress < 0.66) {
-                                            dotCount = 2;
-                                          } else {
-                                            dotCount = 3;
-                                          }
-                                          return Text(
-                                            '·' * dotCount,
-                                            style: const TextStyle(
-                                              fontFamily: 'Aeroport',
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w400,
-                                              color: Colors.white,
-                                            ),
-                                            textAlign: TextAlign.left,
-                                          );
-                                        },
-                                      )
-                                    else if (pair.error != null)
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: _scrollController,
+                            reverse: false,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: Padding(
+                              padding: const EdgeInsets.only(
+                                  left: 20.0, right: 20.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.start,
+                                children: _qaPairs.asMap().entries.map((entry) {
+                                  final index = entry.key;
+                                  final pair = entry.value;
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      // Question
                                       Text(
-                                        pair.error!,
+                                        pair.question,
                                         style: const TextStyle(
                                           fontFamily: 'Aeroport',
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w400,
-                                          color: Colors.red,
-                                        ),
-                                        textAlign: TextAlign.left,
-                                      )
-                                    else if (pair.response != null)
-                                      Text(
-                                        pair.response!,
-                                        style: const TextStyle(
-                                          fontFamily: 'Aeroport',
-                                          fontSize: 15,
+                                          fontSize: 20,
                                           fontWeight: FontWeight.w400,
                                           color: Colors.white,
                                         ),
                                         textAlign: TextAlign.left,
-                                      )
-                                    else
-                                      const Text(
-                                        'No response received',
-                                        style: TextStyle(
-                                          fontFamily: 'Aeroport',
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w400,
-                                          color: Colors.white,
-                                        ),
                                       ),
-                                    // Add spacing between Q&A pairs (except for the last one in reversed list)
-                                    if (index < _qaPairs.length - 1)
-                                      const SizedBox(height: 32),
-                                  ],
-                                );
-                              }).toList(),
+                                      const SizedBox(height: 16),
+                                      // Response (loading, error, or content)
+                                      if (pair.isLoading &&
+                                          pair.dotsController != null)
+                                        AnimatedBuilder(
+                                          animation: pair.dotsController!,
+                                          builder: (context, child) {
+                                            final progress =
+                                                pair.dotsController!.value;
+                                            int dotCount = 1;
+                                            if (progress < 0.33) {
+                                              dotCount = 1;
+                                            } else if (progress < 0.66) {
+                                              dotCount = 2;
+                                            } else {
+                                              dotCount = 3;
+                                            }
+                                            return Text(
+                                              '·' * dotCount,
+                                              style: const TextStyle(
+                                                fontFamily: 'Aeroport',
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w400,
+                                                color: Colors.white,
+                                              ),
+                                              textAlign: TextAlign.left,
+                                            );
+                                          },
+                                        )
+                                      else if (pair.error != null)
+                                        Text(
+                                          pair.error!,
+                                          style: const TextStyle(
+                                            fontFamily: 'Aeroport',
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w400,
+                                            color: Colors.red,
+                                          ),
+                                          textAlign: TextAlign.left,
+                                        )
+                                      else if (pair.response != null)
+                                        Text(
+                                          pair.response!,
+                                          style: const TextStyle(
+                                            fontFamily: 'Aeroport',
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w400,
+                                            color: Colors.white,
+                                          ),
+                                          textAlign: TextAlign.left,
+                                        )
+                                      else
+                                        const Text(
+                                          'No response received',
+                                          style: TextStyle(
+                                            fontFamily: 'Aeroport',
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w400,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      // Add spacing between Q&A pairs (except for the last one in reversed list)
+                                      if (index < _qaPairs.length - 1)
+                                        const SizedBox(height: 32),
+                                    ],
+                                  );
+                                }).toList(),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        // Custom scrollbar - always visible on mobile
+                        // Position it as a separate row item to ensure it's always in viewport
+                        SizedBox(
+                          width: 1.0,
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              // Check for valid constraints and scroll controller
+                              if (!_scrollController.hasClients ||
+                                  constraints.maxHeight == double.infinity ||
+                                  constraints.maxHeight <= 0) {
+                                return const SizedBox.shrink();
+                              }
+
+                              try {
+                                final maxScroll =
+                                    _scrollController.position.maxScrollExtent;
+                                if (maxScroll <= 0) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                final containerHeight = constraints.maxHeight;
+                                final indicatorHeight =
+                                    (containerHeight * _scrollIndicatorHeight)
+                                        .clamp(0.0, containerHeight);
+                                final availableSpace =
+                                    (containerHeight - indicatorHeight)
+                                        .clamp(0.0, containerHeight);
+                                final topPosition =
+                                    (_scrollProgress * availableSpace)
+                                        .clamp(0.0, containerHeight);
+
+                                // Only show white thumb, no grey track background
+                                return Align(
+                                  alignment: Alignment.topCenter,
+                                  child: Padding(
+                                    padding: EdgeInsets.only(top: topPosition),
+                                    child: Container(
+                                      width: 1.0,
+                                      height: indicatorHeight.clamp(
+                                          0.0, containerHeight),
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                );
+                              } catch (e) {
+                                // Return empty widget if any error occurs
+                                return const SizedBox.shrink();
+                              }
+                            },
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(15),
+                    padding: const EdgeInsets.all(20),
                     decoration: const BoxDecoration(
                       color: Colors.black,
                     ),
