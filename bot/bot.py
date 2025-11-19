@@ -118,7 +118,7 @@ async def ensure_user_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Create inline keyboard with button
     keyboard = [
-        [InlineKeyboardButton("Run app", url="https://t.me/xp7ktestbot/app?mode=fullscreen")]
+        [InlineKeyboardButton("Run app", url="https://t.me/xp7kbot/app?mode=fullscreen")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
