@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Optional
 import httpx
 import os
 import json
@@ -22,6 +23,28 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # Using tinyllama as default - smaller model that works on Railway free tier
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "tinyllama")
 
+# API Key for authentication - must be set in environment variables
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise ValueError("API_KEY environment variable must be set for API security")
+
+
+def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """
+    Verify API key from X-API-Key header
+    """
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Please provide X-API-Key header."
+        )
+    if x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key"
+        )
+    return x_api_key
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -37,9 +60,10 @@ async def root():
 
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, api_key: str = Depends(verify_api_key)):
     """
     Send a message to Ollama and return the AI response (streaming to avoid timeouts)
+    Requires valid API key in X-API-Key header
     """
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")

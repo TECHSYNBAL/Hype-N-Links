@@ -131,6 +131,10 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def stream_ai_response(message_text: str, bot, chat_id: int, message_id: int):
     """Stream AI response and edit message as chunks arrive"""
     ai_backend_url = os.getenv('AI_BACKEND_URL', 'https://xp7k-production.up.railway.app')
+    api_key = os.getenv('API_KEY')
+    if not api_key:
+        raise ValueError("API_KEY environment variable must be set")
+    
     accumulated_text = ""
     last_edit_time = asyncio.get_event_loop().time()
     edit_interval = 1.0  # Edit message every 1 second to avoid rate limits
@@ -141,7 +145,10 @@ async def stream_ai_response(message_text: str, bot, chat_id: int, message_id: i
                 "POST",
                 f"{ai_backend_url}/api/chat",
                 json={"message": message_text},
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": api_key
+                }
             ) as response:
                 response.raise_for_status()
                 

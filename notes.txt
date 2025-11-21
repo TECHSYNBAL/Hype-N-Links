@@ -1,6 +1,5 @@
-dyor
-swap.coffee
-AI envs
+
+swap.coffee flutter sdk
 
 failed to connect
 mobile tma scroll on responce generating

@@ -1641,6 +1641,10 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
   // List to store all Q&A pairs
   final List<QAPair> _qaPairs = [];
   final String _apiUrl = 'https://xp7k-production.up.railway.app';
+  // API Key - set via environment variable at build time or use const
+  // For production, set this via build-time environment or use a config approach
+  final String _apiKey =
+      const String.fromEnvironment('API_KEY', defaultValue: '');
   late AnimationController _dotsController;
 
   // Input field controllers
@@ -1826,11 +1830,24 @@ class _NewPageState extends State<NewPage> with TickerProviderStateMixin {
 
   Future<void> _fetchAIResponse(QAPair pair) async {
     try {
+      if (_apiKey.isEmpty) {
+        if (mounted) {
+          setState(() {
+            pair.error =
+                'API key not configured. Please set API_KEY environment variable.';
+            pair.isLoading = false;
+            pair.dotsController?.stop();
+          });
+        }
+        return;
+      }
+
       final request = http.Request(
         'POST',
         Uri.parse('$_apiUrl/api/chat'),
       );
       request.headers['Content-Type'] = 'application/json';
+      request.headers['X-API-Key'] = _apiKey;
       request.body = jsonEncode({'message': pair.question});
 
       final client = http.Client();
