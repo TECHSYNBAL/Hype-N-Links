@@ -16,6 +16,9 @@ class DiagonalLinePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (size.width == 0 || size.height == 0) return;
 
+    // Don't draw anything if no real data is provided
+    if (dataPoints == null || dataPoints!.isEmpty) return;
+
     final paint = Paint()
       ..color = const Color(0xFFFFFFFF)
       ..strokeWidth = 1.33
@@ -25,8 +28,8 @@ class DiagonalLinePainter extends CustomPainter {
 
     final path = Path();
 
-    // Use real data if provided, otherwise use sample points
-    final points = dataPoints ?? _getSamplePoints(size);
+    // Use only real data - no sample points
+    final points = dataPoints!;
 
     if (points.isEmpty) return;
 
@@ -87,19 +90,6 @@ class DiagonalLinePainter extends CustomPainter {
     }
 
     canvas.drawPath(path, paint);
-  }
-
-  // Sample data points for demonstration (normalized 0.0 to 1.0)
-  List<double> _getSamplePoints(Size size) {
-    return [
-      0.1, // Start low
-      0.6, // First peak
-      0.3, // First valley
-      0.2, // Deep dip
-      0.7, // Second peak
-      0.5, // Descent
-      0.9, // Final ascent
-    ];
   }
 
   @override
@@ -260,11 +250,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // Chart data
   List<double>? _chartDataPoints;
   bool _isLoadingChart = true;
+  String? _chartError; // Error message for chart loading
   String _selectedResolution = 'min1'; // Default: min1 (m)
   double? _chartMinPrice;
   double? _chartMaxPrice;
   DateTime? _chartFirstTimestamp;
   DateTime? _chartLastTimestamp;
+
+  // Rate limiting for dyor API (1 call per second)
+  DateTime? _lastChartApiCall;
+  int _chartRetryCount = 0;
+  static const int _maxRetries = 5;
+  static const Duration _rateLimitDelay = Duration(seconds: 1);
 
   // TON address for default pair
   static const String _tonAddress =
@@ -503,10 +500,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _fetchMarketStats();
   }
 
-  Future<void> _fetchChartData() async {
-    setState(() {
-      _isLoadingChart = true;
-    });
+  Future<void> _fetchChartData({bool isRetry = false}) async {
+    // Respect rate limiting: 1 call per second
+    if (_lastChartApiCall != null) {
+      final timeSinceLastCall = DateTime.now().difference(_lastChartApiCall!);
+      if (timeSinceLastCall < _rateLimitDelay) {
+        final waitTime = _rateLimitDelay - timeSinceLastCall;
+        print(
+            'Rate limiting: waiting ${waitTime.inMilliseconds}ms before API call');
+        await Future.delayed(waitTime);
+      }
+    }
+
+    if (!isRetry) {
+      setState(() {
+        _isLoadingChart = true;
+        _chartError = null;
+        _chartRetryCount = 0;
+      });
+    }
+
+    _lastChartApiCall = DateTime.now();
 
     try {
       // Get time range for the selected resolution
@@ -522,7 +536,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         'to': timeRange['to']!,
       });
 
-      print('Fetching chart data from: $uri');
+      print('Fetching chart data from: $uri (attempt ${_chartRetryCount + 1})');
       final response = await http.get(uri);
       print('Chart API response status: ${response.statusCode}');
 
@@ -594,14 +608,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
           if (prices.isEmpty) {
             print('Error: No prices could be parsed from chart data');
-            setState(() {
-              _chartDataPoints = null;
-              _chartMinPrice = null;
-              _chartMaxPrice = null;
-              _chartFirstTimestamp = null;
-              _chartLastTimestamp = null;
-              _isLoadingChart = false;
-            });
+            _handleChartError('No price data available');
             return;
           }
 
@@ -628,6 +635,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _chartFirstTimestamp = firstTimestamp;
                 _chartLastTimestamp = lastTimestamp;
                 _isLoadingChart = false;
+                _chartError = null;
+                _chartRetryCount = 0;
               });
             } else {
               // All prices are the same, set to middle
@@ -638,6 +647,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _chartFirstTimestamp = firstTimestamp;
                 _chartLastTimestamp = lastTimestamp;
                 _isLoadingChart = false;
+                _chartError = null;
+                _chartRetryCount = 0;
               });
             }
           } else {
@@ -651,27 +662,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             });
           }
         } else {
-          setState(() {
-            _chartDataPoints = null;
-            _chartMinPrice = null;
-            _chartMaxPrice = null;
-            _chartFirstTimestamp = null;
-            _chartLastTimestamp = null;
-            _isLoadingChart = false;
-          });
+          _handleChartError('No chart data points received');
         }
+      } else if (response.statusCode == 429) {
+        // Rate limit exceeded - retry with longer delay
+        print('Rate limit exceeded (429), retrying...');
+        _handleChartErrorWithRetry('Rate limit exceeded. Retrying...');
       } else {
-        setState(() {
-          _chartDataPoints = null;
-          _chartMinPrice = null;
-          _chartMaxPrice = null;
-          _chartFirstTimestamp = null;
-          _chartLastTimestamp = null;
-          _isLoadingChart = false;
-        });
+        // Other HTTP errors
         print('Chart fetch failed: ${response.statusCode}');
+        _handleChartErrorWithRetry(
+            'Failed to load chart (${response.statusCode})');
       }
     } catch (e) {
+      print('Chart fetch error: $e');
+      _handleChartErrorWithRetry('Network error: ${e.toString()}');
+    }
+  }
+
+  void _handleChartError(String error) {
+    setState(() {
+      _chartDataPoints = null;
+      _chartMinPrice = null;
+      _chartMaxPrice = null;
+      _chartFirstTimestamp = null;
+      _chartLastTimestamp = null;
+      _isLoadingChart = false;
+      _chartError = error;
+    });
+  }
+
+  void _handleChartErrorWithRetry(String error) {
+    if (_chartRetryCount < _maxRetries) {
+      _chartRetryCount++;
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+      final backoffDelay =
+          Duration(seconds: math.pow(2, _chartRetryCount - 1).toInt());
+      print(
+          'Retrying chart fetch in ${backoffDelay.inSeconds}s (attempt $_chartRetryCount/$_maxRetries)');
+
+      setState(() {
+        _chartError = '$error Retrying in ${backoffDelay.inSeconds}s...';
+      });
+
+      Future.delayed(backoffDelay, () {
+        if (mounted) {
+          _fetchChartData(isRetry: true);
+        }
+      });
+    } else {
+      // Max retries reached
       setState(() {
         _chartDataPoints = null;
         _chartMinPrice = null;
@@ -679,8 +719,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _chartFirstTimestamp = null;
         _chartLastTimestamp = null;
         _isLoadingChart = false;
+        _chartError =
+            'Failed to load chart after $_maxRetries attempts. Please try again later.';
       });
-      print('Chart fetch error: $e');
     }
   }
 
@@ -1472,13 +1513,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                                                             ),
                                                           ),
                                                         )
-                                                      : CustomPaint(
-                                                          painter:
-                                                              DiagonalLinePainter(
-                                                            dataPoints:
-                                                                _chartDataPoints,
-                                                          ),
-                                                        ),
+                                                      : (_chartDataPoints !=
+                                                                  null &&
+                                                              _chartDataPoints!
+                                                                  .isNotEmpty)
+                                                          ? CustomPaint(
+                                                              painter:
+                                                                  DiagonalLinePainter(
+                                                                dataPoints:
+                                                                    _chartDataPoints,
+                                                              ),
+                                                            )
+                                                          : Container(
+                                                              // Transparent container to maintain layout
+                                                              color: Colors
+                                                                  .transparent,
+                                                              child:
+                                                                  _chartError !=
+                                                                          null
+                                                                      ? Center(
+                                                                          child:
+                                                                              Padding(
+                                                                            padding:
+                                                                                const EdgeInsets.all(8.0),
+                                                                            child:
+                                                                                Text(
+                                                                              _chartError!,
+                                                                              style: const TextStyle(
+                                                                                fontSize: 10,
+                                                                                color: Color(0xFF818181),
+                                                                              ),
+                                                                              textAlign: TextAlign.center,
+                                                                            ),
+                                                                          ),
+                                                                        )
+                                                                      : null,
+                                                            ),
                                                 ),
                                               ),
                                               const SizedBox(height: 5),
